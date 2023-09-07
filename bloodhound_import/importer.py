@@ -366,7 +366,7 @@ async def parse_zipfile(filename: str, driver: neo4j.Driver):
                 await parse_file(temp.name, driver)
 
 
-async def parse_file(filename: str, driver: neo4j.AsyncDriver):
+async def parse_file(filename: str, driver: neo4j.AsyncDriver, props: dict = None):
     """Parse a bloodhound file.
 
     Arguments:
@@ -409,6 +409,9 @@ async def parse_file(filename: str, driver: neo4j.AsyncDriver):
     objs = ijson.items(f, 'data.item')
     async with driver.session() as session:
         for entry in objs:
+            # Add additional properties to entity if provided
+            if props and 'Properties' in entry:
+                entry['Properties'].update(props)
             try:
                 await session.write_transaction(parse_function, entry)
                 count = count + 1
