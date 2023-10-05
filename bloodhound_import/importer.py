@@ -50,25 +50,25 @@ def build_add_edge_query(source_label: str, target_label: str, edge_type: str, e
 
 def check_add_edge(tx: neo4j.Transaction, source_label: str, target_label: str, edge_type: str, edge_props: str,
                    type: str = "objectid", **kwargs) -> list:
-    # source = kwargs.get('props', {}).get('source', None)
-    # target = kwargs.get('props', {}).get('target', None)
-    #
-    # if source is None:
-    #     raise Exception("Source is None")
-    #
-    # if target is None:
-    #     raise Exception("Target is None")
-    #
-    # query = 'UNWIND $props AS prop MATCH (n:{1} {{{0}: prop.source}}) MATCH (m:{2} {{objectid: prop.target}}) MATCH (n)-[r:{3} {4}]->(m) RETURN n.{0} as source'
-    # query = query.format(type, source_label, target_label, edge_type, edge_props)
-    #
-    # result = [
-    #     r for r in tx.run(query, **kwargs)
-    #     if r['source'] == source
-    # ]
-    #
-    # if len(result) > 0:
-    #     return []
+    source = kwargs.get('props', {}).get('source', None)
+    target = kwargs.get('props', {}).get('target', None)
+
+    if source is None:
+        raise Exception("Source is None")
+
+    if target is None:
+        raise Exception("Target is None")
+
+    query = 'UNWIND $props AS prop MATCH (n:{1} {{{0}: prop.source}}) MATCH (m:{2} {{objectid: prop.target}}) MATCH (n)-[r:{3} {4}]->(m) RETURN n.{0} as source'
+    query = query.format(type, source_label, target_label, edge_type, edge_props)
+
+    result = [
+        r for r in tx.run(query, **kwargs)
+        if r['source'] == source
+    ]
+
+    if len(result) > 0:
+        return []
 
     return [
         dict(
@@ -160,7 +160,20 @@ def parse_ou(tx: neo4j.Transaction, ou: dict):
         for target in targets:
             trans += check_add_edge('OU', target['ObjectType'], 'Contains', '{isacl: false}',
                                     props=dict(source=identifier, target=target['ObjectIdentifier']))
+    options = [
+        ('Users', 'User', 'Contains'),
+        ('Computers', 'Computer', 'Contains'),
+        ('ChildOus', 'OU', 'Contains'),
+    ]
 
+    for option, member_type, edge_name in options:
+        if option in ou and ou[option]:
+            targets = ou[option]
+            for target in targets:
+                trans += check_add_edge(tx,
+                                        'OU', member_type, edge_name, '{isacl: false}',
+                                        props=dict(source=identifier, target=target)
+                                        )
     if 'Links' in ou and ou['Links']:
         for gpo in ou['Links']:
             trans += check_add_edge(tx,
@@ -189,6 +202,17 @@ def parse_ou(tx: neo4j.Transaction, ou: dict):
                                                 '{isacl: false, fromgpo: true}',
                                                 props=dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier'])
                                                 )
+
+    for option, edge_name in options:
+        if option in ou and ou[option]:
+            targets = ou[option]
+            for target in targets:
+                for computer in ou['Computers']:
+                    trans += check_add_edge(tx,
+                                            target['ObjectType'], 'Computer', edge_name,
+                                            '{isacl: false, fromgpo: true}',
+                                            props=dict(target=computer, source=target['ObjectIdentifier'])
+                                            )
     return trans
 
 
@@ -204,7 +228,6 @@ def parse_gpo(tx: neo4j.Transaction, gpo: dict):
 
     query = 'UNWIND $props AS prop MERGE (n:Base {objectid: prop.source}) SET n:GPO SET n += prop.map'
     props = {'map': gpo['Properties'], 'source': identifier}
-    # tx.run(query, props=props)
 
     # if not check_object(tx, 'GPO', props=props):
     trans += [
@@ -234,7 +257,6 @@ def parse_computer(tx: neo4j.Transaction, computer: dict):
     property_query = 'UNWIND $props AS prop MERGE (n:Base {objectid: prop.source}) SET n:Computer SET n += prop.map'
     props = {'map': computer['Properties'], 'source': identifier}
 
-    # if not check_object(tx, 'Computer', props=props):
     trans += [
         dict(
             query=property_query,
@@ -254,7 +276,7 @@ def parse_computer(tx: neo4j.Transaction, computer: dict):
         for entry in computer['AllowedToDelegate']:
             trans += check_add_edge(tx,
                                     'Computer', 'Group', 'MemberOf', '{isacl:false}',
-                                    props=dict(source=identifier, target=entry)
+                                    props=dict(source=identifier, target=entry['ObjectIdentifier'])
                                     )
 
     # (Property name, Edge name, Use "Results" format)
@@ -274,17 +296,17 @@ def parse_computer(tx: neo4j.Transaction, computer: dict):
                 # query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
                 #                              '{isacl:false, fromgpo: false}')
                 # tx.run(query, props=dict(source=target['ObjectIdentifier'], target=identifier))
-                if isinstance(target, str):
-                    trans += check_add_edge(tx,
-                                            'Base', 'Computer', edge_name, '{isacl:false, fromgpo: false}', "name",
-                                            props=dict(source=target, target=identifier)
-                                            )
-
-                else:
-                    trans += check_add_edge(tx,
-                                        target['ObjectType'], 'Computer', edge_name, '{isacl:false, fromgpo: false}',
-                                        props=dict(source=target['ObjectIdentifier'], target=identifier)
-                                        )
+                # if isinstance(target, str):
+                #     trans += check_add_edge(tx,
+                #                             'Base', 'Computer', edge_name, '{isacl:false, fromgpo: false}', "name",
+                #                             props=dict(source=target, target=identifier)
+                #                             )
+                #
+                # else:
+                trans += check_add_edge(tx,
+                                    target['ObjectType'], 'Computer', edge_name, '{isacl:false, fromgpo: false}',
+                                    props=dict(source=target['ObjectIdentifier'], target=identifier)
+                                    )
     # (Session type, source)
     session_types = [
         ('Sessions', 'netsessionenum'),
@@ -298,7 +320,7 @@ def parse_computer(tx: neo4j.Transaction, computer: dict):
                 # if 'UserId' in entry:
                 trans += check_add_edge(tx,
                                         'Computer', 'User', 'HasSession', '{isacl:false, source:"%s"}' % source,
-                                        props=dict(source=entry['UserSID'], target=identifier)
+                                        props=dict(target=entry['UserSID'], source=identifier)
                                         )
 
     if 'Aces' in computer and computer['Aces'] is not None:
@@ -442,6 +464,20 @@ def parse_domain(tx: neo4j.Transaction, domain: dict):
                                     '{sidfiltering: prop.sidfiltering, trusttype: prop.trusttype, transitive: prop.transitive, isacl: false}',
                                     props=props
                                     )
+    options = [
+        ('Users', 'User', 'Contains'),
+        ('Computers', 'Computer', 'Contains'),
+        ('ChildOus', 'OU', 'Contains'),
+    ]
+
+    for option, member_type, edge_name in options:
+        if option in domain and domain[option]:
+            targets = domain[option]
+            for target in targets:
+                trans += check_add_edge(tx,
+                                        'OU', member_type, edge_name, '{isacl: false}',
+                                        props=dict(source=identifier, target=target)
+                                        )
 
     if 'ChildObjects' in domain and domain['ChildObjects']:
         targets = domain['ChildObjects']
@@ -470,17 +506,17 @@ def parse_domain(tx: neo4j.Transaction, domain: dict):
     if 'GPOChanges' in domain and domain['GPOChanges']:
         gpo_changes = domain['GPOChanges']
         affected_computers = gpo_changes['AffectedComputers']
-        for option, edge_name in options:
-            if option in gpo_changes and gpo_changes[option]:
-                targets = gpo_changes[option]
-                for target in targets:
-                    for computer in affected_computers:
-                        props = dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier'])
-                        trans += check_add_edge(tx,
-                                                target['ObjectType'], 'Computer', edge_name,
-                                                '{isacl: false, fromgpo: true}',
-                                                props=props
-                                                )
+
+    for option, edge_name in options:
+        if option in domain and domain[option]:
+            targets = domain[option]
+            for target in targets:
+                for computer in domain['Computers']:
+                    trans += check_add_edge(tx,
+                                            target['ObjectType'], 'Computer', edge_name,
+                                            '{isacl: false, fromgpo: true}',
+                                            props=dict(target=computer, source=target['ObjectIdentifier'])
+                                            )
 
     return trans
 
@@ -548,12 +584,14 @@ def executer(tx: neo4j.Transaction, transactions: list):
         tx.run(t['query'], **data)
 
 
-def worker(index, parse_function, **kwargs):
+def worker(index, **kwargs):
     global running, count
     icount = 0
     driver = database.init_sync_driver(**kwargs)
     while running and icount < 100:
         entry = q.get()
+        parse_function = entry.pop('parse_function')
+
         try:
             do_task(entry, parse_function, driver)
 
@@ -581,7 +619,7 @@ def worker(index, parse_function, **kwargs):
     # Create a new thread
     # Cicle the thread every 100 requests, to release the driver, memory e etc...
     if running:
-        kwargs.update(dict(index=index, parse_function=parse_function))
+        kwargs.update(dict(index=index))
         t = threading.Thread(target=worker, kwargs=kwargs)
         t.daemon = True
         t.start()
@@ -596,11 +634,11 @@ def do_task(entry, parse_function, driver: neo4j.GraphDatabase):
 
         try:
             with driver.session() as session:
-                transactions = session.write_transaction(parse_function, entry)
+                transactions = session.execute_write(parse_function, entry)
 
             if isinstance(transactions, list) and len(transactions) > 0:
                 with driver.session() as session:
-                    session.write_transaction(executer, transactions)
+                    session.execute_write(executer, transactions)
 
             break
         except KeyboardInterrupt as e:
@@ -680,7 +718,7 @@ def parse_file(filename: str, driver: neo4j.AsyncDriver, props: dict = None, kwa
 
     # worker threads
     for i in range(threads):
-        kwargs.update(dict(index=i, parse_function=parse_function))
+        kwargs.update(dict(index=i))
         t = threading.Thread(target=worker, kwargs=kwargs)
         t.daemon = True
         t.start()
@@ -697,6 +735,7 @@ def parse_file(filename: str, driver: neo4j.AsyncDriver, props: dict = None, kwa
             for entry in objs:
                 if props and 'Properties' in entry:
                     entry['Properties'].update(props)
+                    entry['parse_function'] = parse_function
                 q.put(entry)
                 # do_task(entry, parse_function, driver)
 
@@ -723,22 +762,3 @@ def parse_file(filename: str, driver: neo4j.AsyncDriver, props: dict = None, kwa
     logging.info("Parsed %d out of %d records in %s.", count, total, filename)
 
     logging.info("Completed file: %s", filename)
-    # ten_percent = total // 10 if total > 10 else 1
-    # count = 0
-    # f = codecs.open(filename, 'r', encoding='utf-8-sig')
-    # objs = ijson.items(f, 'data.item')
-    # with driver.session() as session:
-    #     for entry in objs:
-    #         # Add additional properties to entity if provided
-    #         if props and 'Properties' in entry:
-    #             entry['Properties'].update(props)
-    #         try:
-    #             session.write_transaction(parse_function, entry)
-    #             count = count + 1
-    #         except neo4j.exceptions.ConstraintError as e:
-    #             print(e)
-    #         if count % ten_percent == 0:
-    #             logging.info("Parsed %d out of %d records in %s.", count, total, filename)
-    #
-    # f.close()
-    # logging.info("Completed file: %s", filename)
