@@ -376,7 +376,7 @@ def parse_zipfile(filename: str, driver: neo4j.Driver):
                 parse_file(temp.name, driver)
 
 
-def parse_file(filename: str, driver: neo4j.Driver, props: dict = None):
+def parse_file(filename: str, driver: neo4j.Driver, chunk_size: int = 5000, props: dict = None):
     """Parse a bloodhound file.
 
     Arguments:
@@ -419,7 +419,6 @@ def parse_file(filename: str, driver: neo4j.Driver, props: dict = None):
 
     MAX_RETRIES = 10
     RETRY_WAIT = 2  # in seconds
-    CHUNK_SIZE = 5000
 
     with (driver.session() as session):
         for retry_count in range(MAX_RETRIES):
@@ -439,7 +438,7 @@ def parse_file(filename: str, driver: neo4j.Driver, props: dict = None):
                     except neo4j.exceptions.ConstraintError as e:
                         logging.error("ConstraintError error message: %s", e)
 
-                    if count % CHUNK_SIZE == 0:
+                    if count % chunk_size == 0:
                         logging.info("Parsed %d out of %d records in %s.", count, total, filename)
                         tx.commit()
                         tx = session.begin_transaction()
