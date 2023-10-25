@@ -419,7 +419,7 @@ def parse_file(filename: str, driver: neo4j.Driver, props: dict = None):
 
     MAX_RETRIES = 10
     RETRY_WAIT = 2  # in seconds
-    CHUNK_SIZE = 5000
+    CHUNK_SIZE = 1000
 
     with (driver.session() as session):
         for retry_count in range(MAX_RETRIES):
