@@ -5,6 +5,7 @@
 
 import codecs
 import logging
+import re
 import time
 from dataclasses import dataclass
 from os.path import basename
@@ -60,23 +61,34 @@ def process_spntarget_list(spntarget_list: list, objectid: str, tx: neo4j.Transa
         tx.run(query, props=props)
 
 
+def get_neo4j_version(tx):
+    result = tx.run("CALL dbms.components() YIELD versions UNWIND versions AS version RETURN version")
+    version_string = result.single()[0]
+    return re.match(r'(\d+\.\d+)', version_string).group(1)
+
+
 def add_constraints(tx: neo4j.Transaction):
     """Adds bloodhound contraints to neo4j
 
     Arguments:
         tx {neo4j.Transaction} -- Neo4j transaction.
     """
-    tx.run('CREATE CONSTRAINT base_objectid_unique ON (b:Base) ASSERT b.objectid IS UNIQUE')
-    tx.run('CREATE CONSTRAINT computer_objectid_unique ON (c:Computer) ASSERT c.objectid IS UNIQUE')
-    tx.run('CREATE CONSTRAINT domain_objectid_unique ON (d:Domain) ASSERT d.objectid IS UNIQUE')
-    tx.run('CREATE CONSTRAINT group_objectid_unique ON (g:Group) ASSERT g.objectid IS UNIQUE')
-    tx.run('CREATE CONSTRAINT user_objectid_unique ON (u:User) ASSERT u.objectid IS UNIQUE')
-    tx.run("CREATE CONSTRAINT ON (c:User) ASSERT c.name IS UNIQUE")
-    tx.run("CREATE CONSTRAINT ON (c:Computer) ASSERT c.name IS UNIQUE")
-    tx.run("CREATE CONSTRAINT ON (c:Group) ASSERT c.name IS UNIQUE")
-    tx.run("CREATE CONSTRAINT ON (c:Domain) ASSERT c.name IS UNIQUE")
-    tx.run("CREATE CONSTRAINT ON (c:OU) ASSERT c.guid IS UNIQUE")
-    tx.run("CREATE CONSTRAINT ON (c:GPO) ASSERT c.name IS UNIQUE")
+    version = get_neo4j_version(tx)
+    version = float(version)
+    assert_or_require = "ASSERT" if version < 5 else "REQUIRE"
+    on_or_for = "ON" if version < 5 else "FOR"
+
+    tx.run(f"CREATE CONSTRAINT base_objectid_unique IF NOT EXISTS {on_or_for} (b:Base) {assert_or_require} b.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT computer_objectid_unique IF NOT EXISTS {on_or_for} (c:Computer) {assert_or_require} c.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT domain_objectid_unique IF NOT EXISTS {on_or_for} (d:Domain) {assert_or_require} d.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT group_objectid_unique IF NOT EXISTS {on_or_for} (g:Group) {assert_or_require} g.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT user_objectid_unique IF NOT EXISTS {on_or_for} (u:User) {assert_or_require} u.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:User) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Computer) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Group) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Domain) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:OU) {assert_or_require} c.guid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:GPO) {assert_or_require} c.name IS UNIQUE")
 
 
 def parse_ou(tx: neo4j.Transaction, ou: dict):
@@ -383,6 +395,13 @@ def parse_file(filename: str, driver: neo4j.Driver, chunk_size: int = 5000, prop
         filename {str} -- JSON filename to parse.
         driver {neo4j.GraphDatabase} -- driver to connect to neo4j.
     """
+    try:
+        with driver.session() as session:
+            logging.debug("Adding constraints to the neo4j database")
+            session.write_transaction(add_constraints)
+    except Exception as e:
+        logging.debug("Couldn't add constraints to the neo4j database Error %s", e)
+
     logging.info("Parsing bloodhound file: %s", filename)
 
     if filename.endswith('.zip'):
