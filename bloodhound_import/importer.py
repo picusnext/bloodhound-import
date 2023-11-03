@@ -78,17 +78,17 @@ def add_constraints(tx: neo4j.Transaction):
     assert_or_require = "ASSERT" if version < 5 else "REQUIRE"
     on_or_for = "ON" if version < 5 else "FOR"
 
-    tx.run(f"CREATE CONSTRAINT base_objectid_unique IF NOT EXISTS {on_or_for} (b:Base) {assert_or_require} b.objectid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT computer_objectid_unique IF NOT EXISTS {on_or_for} (c:Computer) {assert_or_require} c.objectid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT domain_objectid_unique IF NOT EXISTS {on_or_for} (d:Domain) {assert_or_require} d.objectid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT group_objectid_unique IF NOT EXISTS {on_or_for} (g:Group) {assert_or_require} g.objectid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT user_objectid_unique IF NOT EXISTS {on_or_for} (u:User) {assert_or_require} u.objectid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:User) {assert_or_require} c.name IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Computer) {assert_or_require} c.name IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Group) {assert_or_require} c.name IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Domain) {assert_or_require} c.name IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:OU) {assert_or_require} c.guid IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:GPO) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT base_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (b:Base) {assert_or_require} (b.object_id, b.assessment_uid) IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT computer_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (c:Computer) {assert_or_require} (c.object_id, c.assessment_uid) IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT domain_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (d:Domain) {assert_or_require} (d.object_id, d.assessment_uid) IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT group_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (g:Group) {assert_or_require} (g.object_id, g.assessment_uid) IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT user_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (u:User) {assert_or_require} (u.object_id, u.assessment_uid) IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:User) {assert_or_require} c.name IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Computer) {assert_or_require} c.name IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Group) {assert_or_require} c.name IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Domain) {assert_or_require} c.name IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:OU) {assert_or_require} c.guid IS UNIQUE")
+    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:GPO) {assert_or_require} c.name IS UNIQUE")
 
 
 def parse_ou(tx: neo4j.Transaction, ou: dict):
