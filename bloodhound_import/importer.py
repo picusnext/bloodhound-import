@@ -16,6 +16,21 @@ import ijson
 import neo4j
 from neo4j.exceptions import TransientError
 
+SUPPORTED_EDGE_TYPES = ["MemberOf", "HasSession", "AdminTo", "AllExtendedRights", "AddMember", "ForceChangePassword",
+                        "GenericAll", "GenericWrite", "Owns", "WriteDacl", "WriteOwner", "CanRDP", "ExecuteDCOM",
+                        "AllowedToDelegate", "ReadLAPSPassword", "Contains", "GPLink", "AddAllowedToAct",
+                        "AllowedToAct", "WriteAccountRestrictions", "SQLAdmin", "ReadGMSAPassword", "HasSIDHistory",
+                        "CanPSRemote", "SyncLAPSPassword", "DumpSMSAPassword", "AZMGGrantRole", "AZMGAddSecret",
+                        "AZMGAddOwner", "AZMGAddMember", "AZMGGrantAppRoles", "AZNodeResourceGroup",
+                        "AZWebsiteContributor", "AZLogicAppContributo", "AZAutomationContributor", "AZAKSContributor",
+                        "AZAddMembers", "AZAddOwner", "AZAddSecret", "AZAvereContributor", "AZContains",
+                        "AZContributor", "AZExecuteCommand", "AZGetCertificates", "AZGetKeys", "AZGetSecrets",
+                        "AZGlobalAdmin", "AZHasRole", "AZManagedIdentity", "AZMemberOf", "AZOwns",
+                        "AZPrivilegedAuthAdmin", "AZPrivilegedRoleAdmin", "AZResetPassword",
+                        "AZUserAccessAdministrator", "AZAppAdmin", "AZCloudAppAdmin", "AZRunsAs",
+                        "AZKeyVaultContributor", "AZVMAdminLogin", "AZVMContributor", "AZLogicAppContributor",
+                        "AddSelf", "WriteSPN", "AddKeyCredentialLink", "DCSync"]
+
 
 @dataclass
 class Query:
@@ -23,13 +38,12 @@ class Query:
     properties: dict
 
 
-SYNC_COUNT = 100
-
-
 def build_add_edge_query(source_label: str, target_label: str, edge_type: str, edge_props: str) -> str:
     """Build a standard edge insert query based on the given params"""
-    insert_query = 'UNWIND $props AS prop MERGE (n:Base {{objectid: prop.source}}) SET n:{0} MERGE (m:Base {{objectid: prop.target}}) SET m:{1} MERGE (n)-[r:{2} {3}]->(m)'
-    return insert_query.format(source_label, target_label, edge_type, edge_props)
+    if edge_type in SUPPORTED_EDGE_TYPES:
+        insert_query = 'UNWIND $props AS prop MERGE (n:Base {{objectid: prop.source}}) SET n:{0} MERGE (m:Base {{objectid: prop.target}}) SET m:{1} MERGE (n)-[r:{2} {3}]->(m)'
+        return insert_query.format(source_label, target_label, edge_type, edge_props)
+
 
 
 def process_ace_list(ace_list: list, objectid: str, objecttype: str, tx: neo4j.Transaction) -> None:
@@ -37,17 +51,17 @@ def process_ace_list(ace_list: list, objectid: str, objecttype: str, tx: neo4j.T
         principal = entry['PrincipalSID']
         principaltype = entry['PrincipalType']
         right = entry['RightName']
+        if right in SUPPORTED_EDGE_TYPES:
+            if objectid == principal:
+                continue
 
-        if objectid == principal:
-            continue
-
-        query = build_add_edge_query(principaltype, objecttype, right, '{isacl: true, isinherited: prop.isinherited}')
-        props = dict(
-            source=principal,
-            target=objectid,
-            isinherited=entry['IsInherited'],
-        )
-        tx.run(query, props=props)
+            query = build_add_edge_query(principaltype, objecttype, right, '{isacl: true, isinherited: prop.isinherited}')
+            props = dict(
+                source=principal,
+                target=objectid,
+                isinherited=entry['IsInherited'],
+            )
+            tx.run(query, props=props)
 
 
 def process_spntarget_list(spntarget_list: list, objectid: str, tx: neo4j.Transaction) -> None:
@@ -78,17 +92,22 @@ def add_constraints(tx: neo4j.Transaction):
     assert_or_require = "ASSERT" if version < 5 else "REQUIRE"
     on_or_for = "ON" if version < 5 else "FOR"
 
-    tx.run(f"CREATE CONSTRAINT base_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (b:Base) {assert_or_require} (b.object_id, b.assessment_uid) IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT computer_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (c:Computer) {assert_or_require} (c.object_id, c.assessment_uid) IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT domain_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (d:Domain) {assert_or_require} (d.object_id, d.assessment_uid) IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT group_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (g:Group) {assert_or_require} (g.object_id, g.assessment_uid) IS UNIQUE")
-    tx.run(f"CREATE CONSTRAINT user_objectid_assessment_uid_unique IF NOT EXISTS {on_or_for} (u:User) {assert_or_require} (u.object_id, u.assessment_uid) IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:User) {assert_or_require} c.name IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Computer) {assert_or_require} c.name IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Group) {assert_or_require} c.name IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Domain) {assert_or_require} c.name IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:OU) {assert_or_require} c.guid IS UNIQUE")
-    # tx.run(f"CREATE CONSTRAINT {on_or_for} (c:GPO) {assert_or_require} c.name IS UNIQUE")
+    tx.run(
+        f"CREATE CONSTRAINT base_objectid_unique IF NOT EXISTS {on_or_for} (b:Base) {assert_or_require} b.objectid IS UNIQUE")
+    tx.run(
+        f"CREATE CONSTRAINT computer_objectid_unique IF NOT EXISTS {on_or_for} (c:Computer) {assert_or_require} c.objectid IS UNIQUE")
+    tx.run(
+        f"CREATE CONSTRAINT domain_objectid_unique IF NOT EXISTS {on_or_for} (d:Domain) {assert_or_require} d.objectid IS UNIQUE")
+    tx.run(
+        f"CREATE CONSTRAINT group_objectid_unique IF NOT EXISTS {on_or_for} (g:Group) {assert_or_require} g.objectid IS UNIQUE")
+    tx.run(
+        f"CREATE CONSTRAINT user_objectid_unique IF NOT EXISTS {on_or_for} (u:User) {assert_or_require} u.objectid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:User) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Computer) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Group) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:Domain) {assert_or_require} c.name IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:OU) {assert_or_require} c.guid IS UNIQUE")
+    tx.run(f"CREATE CONSTRAINT {on_or_for} (c:GPO) {assert_or_require} c.name IS UNIQUE")
 
 
 def parse_ou(tx: neo4j.Transaction, ou: dict):
@@ -106,13 +125,13 @@ def parse_ou(tx: neo4j.Transaction, ou: dict):
     if 'Aces' in ou and ou['Aces'] is not None:
         process_ace_list(ou['Aces'], identifier, "OU", tx)
 
-    if 'ChildObjects' in ou and ou['ChildObjects']:
+    if 'ChildObjects' in ou and ou['ChildObjects'] and 'Contains' in SUPPORTED_EDGE_TYPES:
         targets = ou['ChildObjects']
         for target in targets:
             query = build_add_edge_query('OU', target['ObjectType'], 'Contains', '{isacl: false}')
             tx.run(query, props=dict(source=identifier, target=target['ObjectIdentifier']))
 
-    if 'Links' in ou and ou['Links']:
+    if 'Links' in ou and ou['Links'] and 'GpLink' in SUPPORTED_EDGE_TYPES:
         query = build_add_edge_query('GPO', 'OU', 'GpLink', '{isacl: false, enforced: prop.enforced}')
         for gpo in ou['Links']:
             tx.run(query, props=dict(source=identifier, target=gpo['GUID'].upper(), enforced=gpo['IsEnforced']))
@@ -131,11 +150,12 @@ def parse_ou(tx: neo4j.Transaction, ou: dict):
             if option in gpo_changes and gpo_changes[option]:
                 targets = gpo_changes[option]
                 for target in targets:
-                    query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
-                                                 '{isacl: false, fromgpo: true}')
-                    for computer in affected_computers:
-                        tx.run(query,
-                               props=dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier']))
+                    if edge_name in SUPPORTED_EDGE_TYPES:
+                        query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
+                                                     '{isacl: false, fromgpo: true}')
+                        for computer in affected_computers:
+                            tx.run(query,
+                                   props=dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier']))
 
 
 def parse_gpo(tx: neo4j.Transaction, gpo: dict):
@@ -189,12 +209,13 @@ def parse_computer(tx: neo4j.Transaction, computer: dict):
     ]
 
     for option, edge_name, use_results in options:
-        if option in computer:
-            targets = computer[option]['Results'] if use_results else computer[option]
-            for target in targets:
-                query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
-                                             '{isacl:false, fromgpo: false}')
-                tx.run(query, props=dict(source=target['ObjectIdentifier'], target=identifier))
+        if edge_name in SUPPORTED_EDGE_TYPES:
+            if option in computer:
+                targets = computer[option]['Results'] if use_results else computer[option]
+                for target in targets:
+                    query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
+                                                 '{isacl:false, fromgpo: false}')
+                    tx.run(query, props=dict(source=target['ObjectIdentifier'], target=identifier))
 
     # (Session type, source)
     session_types = [
@@ -230,7 +251,7 @@ def parse_user(tx: neo4j.Transaction, user: dict):
         query = build_add_edge_query('User', 'Group', 'MemberOf', '{isacl: false}')
         tx.run(query, props=dict(source=identifier, target=user['PrimaryGroupSid']))
 
-    if 'AllowedToDelegate' in user and user['AllowedToDelegate']:
+    if 'AllowedToDelegate' in user and user['AllowedToDelegate'] and 'AllowedToDelegate' in SUPPORTED_EDGE_TYPES:
         query = build_add_edge_query('User', 'Computer', 'AllowedToDelegate', '{isacl: false}')
         for entry in user['AllowedToDelegate']:
             tx.run(query, props=dict(source=identifier, target=entry['ObjectIdentifier']))
@@ -240,7 +261,7 @@ def parse_user(tx: neo4j.Transaction, user: dict):
     if 'Aces' in user and user['Aces'] is not None:
         process_ace_list(user['Aces'], identifier, "User", tx)
 
-    if 'SPNTargets' in user and user['SPNTargets'] is not None:
+    if 'SPNTargets' in user and user['SPNTargets'] is not None and 'WriteSPN' in SUPPORTED_EDGE_TYPES:
         process_spntarget_list(user['SPNTargets'], identifier, tx)
 
 
@@ -284,40 +305,41 @@ def parse_domain(tx: neo4j.Transaction, domain: dict):
 
     trust_map = {0: 'ParentChild', 1: 'CrossLink', 2: 'Forest', 3: 'External', 4: 'Unknown'}
     if 'Trusts' in domain and domain['Trusts'] is not None:
-        query = build_add_edge_query('Domain', 'Domain', 'TrustedBy',
-                                     '{sidfiltering: prop.sidfiltering, trusttype: prop.trusttype, transitive: prop.transitive, isacl: false}')
-        for trust in domain['Trusts']:
-            trust_type = trust['TrustType']
-            direction = trust['TrustDirection']
-            props = {}
-            if direction in [1, 3]:
-                props = dict(
-                    source=identifier,
-                    target=trust['TargetDomainSid'],
-                    trusttype=trust_map[trust_type],
-                    transitive=trust['IsTransitive'],
-                    sidfiltering=trust['SidFilteringEnabled'],
-                )
-            elif direction in [2, 4]:
-                props = dict(
-                    target=identifier,
-                    source=trust['TargetDomainSid'],
-                    trusttype=trust_map[trust_type],
-                    transitive=trust['IsTransitive'],
-                    sidfiltering=trust['SidFilteringEnabled'],
-                )
-            else:
-                logging.error("Could not determine direction of trust... direction: %s", direction)
-                continue
-            tx.run(query, props=props)
+        if 'TrustedBy' in SUPPORTED_EDGE_TYPES:
+            query = build_add_edge_query('Domain', 'Domain', 'TrustedBy',
+                                         '{sidfiltering: prop.sidfiltering, trusttype: prop.trusttype, transitive: prop.transitive, isacl: false}')
+            for trust in domain['Trusts']:
+                trust_type = trust['TrustType']
+                direction = trust['TrustDirection']
+                props = {}
+                if direction in [1, 3]:
+                    props = dict(
+                        source=identifier,
+                        target=trust['TargetDomainSid'],
+                        trusttype=trust_map[trust_type],
+                        transitive=trust['IsTransitive'],
+                        sidfiltering=trust['SidFilteringEnabled'],
+                    )
+                elif direction in [2, 4]:
+                    props = dict(
+                        target=identifier,
+                        source=trust['TargetDomainSid'],
+                        trusttype=trust_map[trust_type],
+                        transitive=trust['IsTransitive'],
+                        sidfiltering=trust['SidFilteringEnabled'],
+                    )
+                else:
+                    logging.error("Could not determine direction of trust... direction: %s", direction)
+                    continue
+                tx.run(query, props=props)
 
-    if 'ChildObjects' in domain and domain['ChildObjects']:
+    if 'ChildObjects' in domain and domain['ChildObjects'] and 'Contains' in SUPPORTED_EDGE_TYPES:
         targets = domain['ChildObjects']
         for target in targets:
             query = build_add_edge_query('Domain', target['ObjectType'], 'Contains', '{isacl: false}')
             tx.run(query, props=dict(source=identifier, target=target['ObjectIdentifier']))
 
-    if 'Links' in domain and domain['Links']:
+    if 'Links' in domain and domain['Links'] and 'GpLink' in SUPPORTED_EDGE_TYPES:
         query = build_add_edge_query('GPO', 'OU', 'GpLink', '{isacl: false, enforced: prop.enforced}')
         for gpo in domain['Links']:
             tx.run(
@@ -336,14 +358,15 @@ def parse_domain(tx: neo4j.Transaction, domain: dict):
         gpo_changes = domain['GPOChanges']
         affected_computers = gpo_changes['AffectedComputers']
         for option, edge_name in options:
-            if option in gpo_changes and gpo_changes[option]:
-                targets = gpo_changes[option]
-                for target in targets:
-                    query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
-                                                 '{isacl: false, fromgpo: true}')
-                    for computer in affected_computers:
-                        tx.run(query,
-                               props=dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier']))
+            if edge_name in SUPPORTED_EDGE_TYPES:
+                if option in gpo_changes and gpo_changes[option]:
+                    targets = gpo_changes[option]
+                    for target in targets:
+                        query = build_add_edge_query(target['ObjectType'], 'Computer', edge_name,
+                                                     '{isacl: false, fromgpo: true}')
+                        for computer in affected_computers:
+                            tx.run(query,
+                                   props=dict(source=computer['ObjectIdentifier'], target=target['ObjectIdentifier']))
 
 
 def parse_container(tx: neo4j.Transaction, container: dict):
@@ -362,7 +385,7 @@ def parse_container(tx: neo4j.Transaction, container: dict):
     if 'Aces' in container and container['Aces'] is not None:
         process_ace_list(container['Aces'], identifier, "Container", tx)
 
-    if 'ChildObjects' in container and container['ChildObjects']:
+    if 'ChildObjects' in container and container['ChildObjects'] and 'Contains' in SUPPORTED_EDGE_TYPES:
         targets = container['ChildObjects']
         for target in targets:
             query = build_add_edge_query('Container', target['ObjectType'], 'Contains', '{isacl: false}')
@@ -388,13 +411,19 @@ def parse_zipfile(filename: str, driver: neo4j.Driver):
                 parse_file(temp.name, driver)
 
 
-def parse_file(filename: str, driver: neo4j.Driver, chunk_size: int = 5000, props: dict = None):
+def parse_file(filename: str, driver: neo4j.Driver, chunk_size: int = 5000, props: dict = None,
+               supported_edge_types: list = []):
     """Parse a bloodhound file.
 
     Arguments:
         filename {str} -- JSON filename to parse.
         driver {neo4j.GraphDatabase} -- driver to connect to neo4j.
     """
+    global SUPPORTED_EDGE_TYPES
+
+    if supported_edge_types is not None and len(supported_edge_types) > 0:
+        SUPPORTED_EDGE_TYPES = supported_edge_types
+
     try:
         with driver.session() as session:
             logging.debug("Adding constraints to the neo4j database")
