@@ -41,9 +41,14 @@ class Query:
 def build_add_edge_query(source_label: str, target_label: str, edge_type: str, edge_props: str) -> str:
     """Build a standard edge insert query based on the given params"""
     if edge_type in SUPPORTED_EDGE_TYPES:
-        insert_query = 'UNWIND $props AS prop MERGE (n:Base {{objectid: prop.source}}) SET n:{0} MERGE (m:Base {{objectid: prop.target}}) SET m:{1} MERGE (n)-[r:{2} {3}]->(m)'
-        return insert_query.format(source_label, target_label, edge_type, edge_props)
-
+        insert_query = """
+                        UNWIND $props AS prop
+                        MERGE (n:Base {{objectid: prop.source}}) SET n:{source_label}
+                        MERGE (m:Base {{objectid: prop.target}}) SET m:{target_label}
+                        MERGE (n)-[r:{edge_type}]->(m)
+                        SET r += {edge_props}
+                       """.format(source_label=source_label, target_label=target_label, edge_type=edge_type, edge_props=edge_props)
+        return insert_query
 
 
 def process_ace_list(ace_list: list, objectid: str, objecttype: str, tx: neo4j.Transaction) -> None:
